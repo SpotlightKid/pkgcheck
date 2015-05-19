@@ -72,14 +72,12 @@ def url_regex(url, regex):
     try:
         r = requests.get(url)
     except requests.exceptions.MissingSchema:
-        return "Malformed url"
+        raise ValueError("Malformed url: {}".format(url))
 
     matchObject = re.search(regex, r.text)
 
     if matchObject:
         return matchObject.group(1)
-
-    return 0
 
 
 def url_md5(url):
@@ -131,19 +129,6 @@ def check_md5(pkgname, md5sum, config):
         return "changed since {}".format(datefmt(ts))
 
 
-def parse_watch(filepath):
-    with open(filepath) as f:
-
-        for line in f:
-            # TODO: match until EOL or Hash for commentary
-            p = re.search(r'^\s*_watch\s*=\s*(.*?)$', line)
-
-            if p:
-                f.close()
-                return p.group(1).strip('(|)').split(",")
-                # TODO: Klammern nur am Anfang und Ende stripen
-
-
 class PkgCheck:
     def __init__(self, filepath, config, aur_session):
         self.filepath = filepath
@@ -167,15 +152,13 @@ class PkgCheck:
 
         self.url = package.url or ""
         self.watchurl = ""
-        watch_params = parse_watch(filepath)
+        watch_params = package._symbols.get('_watch')
 
         if watch_params:
-            if len(watch_params) == 2:
-                self.upstreamver = url_regex(watch_params[0].strip("'"),
-                                             watch_params[1].strip("'"))
-
-            if len(watch_params) == 1:
-                self.upstreamver = url_md5(watch_params[0].strip("'"))
+            if isinstance(watch_params, list):
+                self.upstreamver = url_regex(**watch_params)
+            else:
+                self.upstreamver = url_md5(watch_params)
         else:
             if self.url:
                 self.upstreamver = check_md5(self.pkgname, url_md5(self.url),
@@ -188,13 +171,10 @@ class PkgCheck:
         print("check upstream")
 
     def compare_versions(self):
-        if (self.upstreamver > self.pkgver or
-                self.upstreamver > self.aurver and self.upstreamver):
-            return 1  # red
-        else:
-            return 0  # green
+        return (self.upstreamver > self.pkgver or
+                self.upstreamver > self.aurver and self.upstreamver)
 
-    def print_row(self, state):
+    def print_row(self, state=True):
         print("{}{:<20}{:<25}{:<25}{}{}".format(
             '\033[92m' if state else '\033[93m',
             self.pkgname,
@@ -263,10 +243,10 @@ def scandir(path, level, print_all=False):
         print(header)
         print("-" * len(header))
 
-        if package.compare_versions() == 0 and print_all:
-            package.print_row(1)  # print updated, green packages
+        if not package.compare_versions() or print_all:
+            package.print_row()  # print updated, green packages
         else:
-            package.print_row(0)  # print updated, yellow packages
+            package.print_row(False)  # print updated, yellow packages
     elif os.path.exists(path):
         # Print table header
         print(header)
@@ -284,10 +264,10 @@ def scandir(path, level, print_all=False):
                     print(str(exc), file=sys.stderr)
                     continue
 
-                if package.compare_versions() == 0 and print_all:
-                    package.print_row(1)  # print updated, green packages
+                if not package.compare_versions() or print_all:
+                    package.print_row()  # print updated, green packages
                 else:
-                    package.print_row(0)  # print updated, yellow packages
+                    package.print_row(False)  # print updated, yellow packages
     else:
         print("File or directory does not exist.")
 
